@@ -389,7 +389,7 @@ int _sendpacket(void *user_ctx, sock_t sock, int af, IP_Port *ip_port, const uin
 
 int sendpacket(Networking_Core *net, IP_Port ip_port, const uint8_t *data, uint16_t length)
 {
-    return _net_override.sendpacket(_net_override.user_ctx, net->sock, &net->port, data, length);
+    return _net_override.sendpacket(_net_override.user_ctx, net->sock, &ip_port, data, length);
 }
 
 /* Function to receive data
