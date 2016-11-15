@@ -111,12 +111,14 @@ static int inet_pton(sa_family_t family, const char *addrString, void *addrbuf)
 
 #endif
 
+static Networking_Override _net_override;
+
 /* Check if socket is valid.
  *
  * return 1 if valid
  * return 0 if not valid
  */
-int sock_valid(sock_t sock)
+int _sock_valid(void *user_ctx, sock_t sock)
 {
 #if defined(_WIN32) || defined(__WIN32__) || defined (WIN32)
 
@@ -131,9 +133,14 @@ int sock_valid(sock_t sock)
     return 1;
 }
 
+int sock_valid(sock_t sock)
+{
+    return _net_override.sock_valid(_net_override.user_ctx, sock);
+}
+
 /* Close the socket.
  */
-void kill_sock(sock_t sock)
+void _kill_sock(void *user_ctx, sock_t sock)
 {
 #if defined(_WIN32) || defined(__WIN32__) || defined (WIN32)
     closesocket(sock);
@@ -142,12 +149,17 @@ void kill_sock(sock_t sock)
 #endif
 }
 
+void kill_sock(sock_t sock)
+{
+    _net_override.kill_sock(_net_override.user_ctx, sock);
+}
+
 /* Set socket as nonblocking
  *
  * return 1 on success
  * return 0 on failure
  */
-int set_socket_nonblock(sock_t sock)
+int _set_socket_nonblock(void *user_ctx, sock_t sock)
 {
 #if defined(_WIN32) || defined(__WIN32__) || defined (WIN32)
     u_long mode = 1;
@@ -157,12 +169,17 @@ int set_socket_nonblock(sock_t sock)
 #endif
 }
 
+int set_socket_nonblock(sock_t sock)
+{
+    return _net_override.set_socket_nonblock(_net_override.user_ctx, sock);
+}
+
 /* Set socket to not emit SIGPIPE
  *
  * return 1 on success
  * return 0 on failure
  */
-int set_socket_nosigpipe(sock_t sock)
+int _set_socket_nosigpipe(void *user_ctx, sock_t sock)
 {
 #if defined(__MACH__)
     int set = 1;
@@ -172,15 +189,25 @@ int set_socket_nosigpipe(sock_t sock)
 #endif
 }
 
+int set_socket_nosigpipe(sock_t sock)
+{
+    return _net_override.set_socket_nosigpipe(_net_override.user_ctx, sock);
+}
+
 /* Enable SO_REUSEADDR on socket.
  *
  * return 1 on success
  * return 0 on failure
  */
-int set_socket_reuseaddr(sock_t sock)
+int _set_socket_reuseaddr(void *user_ctx, sock_t sock)
 {
     int set = 1;
     return (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (void *)&set, sizeof(set)) == 0);
+}
+
+int set_socket_reuseaddr(sock_t sock)
+{
+    return _net_override.set_socket_reuseaddr(_net_override.user_ctx, sock);
 }
 
 /* Set socket to dual (IPv4 + IPv6 socket)
@@ -188,7 +215,7 @@ int set_socket_reuseaddr(sock_t sock)
  * return 1 on success
  * return 0 on failure
  */
-int set_socket_dualstack(sock_t sock)
+int _set_socket_dualstack(void *user_ctx, sock_t sock)
 {
     int ipv6only = 0;
     socklen_t optsize = sizeof(ipv6only);
@@ -199,6 +226,11 @@ int set_socket_dualstack(sock_t sock)
 
     ipv6only = 0;
     return (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (void *)&ipv6only, sizeof(ipv6only)) == 0);
+}
+
+int set_socket_dualstack(sock_t sock)
+{
+    return _net_override.set_socket_dualstack(_net_override.user_ctx, sock);
 }
 
 
@@ -292,26 +324,26 @@ uint64_t current_time_monotonic(void)
 /* Basic network functions:
  * Function to send packet(data) of length length to ip_port.
  */
-int sendpacket(Networking_Core *net, IP_Port ip_port, const uint8_t *data, uint16_t length)
+int _sendpacket(void *user_ctx, sock_t sock, int af, IP_Port *ip_port, const uint8_t *data, uint16_t length)
 {
-    if (net->family == 0) /* Socket not initialized */
+    if (af == 0) /* Socket not initialized */
         return -1;
 
     /* socket AF_INET, but target IP NOT: can't send */
-    if ((net->family == AF_INET) && (ip_port.ip.family != AF_INET))
+    if ((af == AF_INET) && (ip_port->ip.family != AF_INET))
         return -1;
 
     struct sockaddr_storage addr;
     size_t addrsize = 0;
 
-    if (ip_port.ip.family == AF_INET) {
-        if (net->family == AF_INET6) {
+    if (ip_port->ip.family == AF_INET) {
+        if (af == AF_INET6) {
             /* must convert to IPV4-in-IPV6 address */
             struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)&addr;
 
             addrsize = sizeof(struct sockaddr_in6);
             addr6->sin6_family = AF_INET6;
-            addr6->sin6_port = ip_port.port;
+            addr6->sin6_port = ip_port->port;
 
             /* there should be a macro for this in a standards compliant
              * environment, not found */
@@ -320,7 +352,7 @@ int sendpacket(Networking_Core *net, IP_Port ip_port, const uint8_t *data, uint1
             ip6.uint32[0] = 0;
             ip6.uint32[1] = 0;
             ip6.uint32[2] = htonl(0xFFFF);
-            ip6.uint32[3] = ip_port.ip.ip4.uint32;
+            ip6.uint32[3] = ip_port->ip.ip4.uint32;
             addr6->sin6_addr = ip6.in6_addr;
 
             addr6->sin6_flowinfo = 0;
@@ -330,16 +362,16 @@ int sendpacket(Networking_Core *net, IP_Port ip_port, const uint8_t *data, uint1
 
             addrsize = sizeof(struct sockaddr_in);
             addr4->sin_family = AF_INET;
-            addr4->sin_addr = ip_port.ip.ip4.in_addr;
-            addr4->sin_port = ip_port.port;
+            addr4->sin_addr = ip_port->ip.ip4.in_addr;
+            addr4->sin_port = ip_port->port;
         }
-    } else if (ip_port.ip.family == AF_INET6) {
+    } else if (ip_port->ip.family == AF_INET6) {
         struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)&addr;
 
         addrsize = sizeof(struct sockaddr_in6);
         addr6->sin6_family = AF_INET6;
-        addr6->sin6_port = ip_port.port;
-        addr6->sin6_addr = ip_port.ip.ip6.in6_addr;
+        addr6->sin6_port = ip_port->port;
+        addr6->sin6_addr = ip_port->ip.ip6.in6_addr;
 
         addr6->sin6_flowinfo = 0;
         addr6->sin6_scope_id = 0;
@@ -348,11 +380,16 @@ int sendpacket(Networking_Core *net, IP_Port ip_port, const uint8_t *data, uint1
         return -1;
     }
 
-    int res = sendto(net->sock, (char *) data, length, 0, (struct sockaddr *)&addr, addrsize);
+    int res = sendto(sock, (char *) data, length, 0, (struct sockaddr *)&addr, addrsize);
 
-    loglogdata("O=>", data, length, ip_port, res);
+    //loglogdata("O=>", data, length, ip_port, res);
 
     return res;
+}
+
+int sendpacket(Networking_Core *net, IP_Port ip_port, const uint8_t *data, uint16_t length)
+{
+    return _net_override.sendpacket(_net_override.user_ctx, net->sock, &net->port, data, length);
 }
 
 /* Function to receive data
@@ -412,6 +449,11 @@ void networking_registerhandler(Networking_Core *net, uint8_t byte, packet_handl
     net->packethandlers[byte].object = object;
 }
 
+int networking_poll_override(void *user_ctx, sock_t sock, Networking_PacketReceive *packet)
+{
+    return receivepacket(sock, packet->port, packet->data, &packet->length);
+}
+
 void networking_poll(Networking_Core *net)
 {
     if (net->family == 0) /* Socket not initialized */
@@ -419,19 +461,21 @@ void networking_poll(Networking_Core *net)
 
     unix_time_update();
 
-    IP_Port ip_port;
     uint8_t data[MAX_UDP_PACKET_SIZE];
-    uint32_t length;
 
-    while (receivepacket(net->sock, &ip_port, data, &length) != -1) {
-        if (length < 1) continue;
+    IP_Port resultPort;
+    Networking_PacketReceive packet =
+        { .data = data, .length = sizeof(data), .port = &resultPort };
+
+    while (networking_poll_override(_net_override.user_ctx, net->sock, &packet) != -1) {
+        if (packet.length < 1) continue;
 
         if (!(net->packethandlers[data[0]].function)) {
             LOGGER_WARNING("[%02u] -- Packet has no handler", data[0]);
             continue;
         }
 
-        net->packethandlers[data[0]].function(net->packethandlers[data[0]].object, ip_port, data, length);
+        net->packethandlers[data[0]].function(net->packethandlers[data[0]].object, *packet.port, data, packet.length);
     }
 }
 
@@ -485,6 +529,81 @@ Networking_Core *new_networking(IP ip, uint16_t port)
     return new_networking_ex(ip, port, port + (TOX_PORTRANGE_TO - TOX_PORTRANGE_FROM), 0);
 }
 
+sock_t new_socket(void *user_ctx, int af, int type, int proto, const char *addrbytes, int addrlen, int port)
+{
+    sock_t s = socket(af, type, proto);
+
+    if (!_net_override.sock_valid(_net_override.user_ctx, s)) {
+        return s;
+    }
+
+    /* Functions to increase the size of the send and receive UDP buffers.
+     */
+    int n = 1024 * 1024 * 2;
+    setsockopt(s, SOL_SOCKET, SO_RCVBUF, (char *)&n, sizeof(n));
+    setsockopt(s, SOL_SOCKET, SO_SNDBUF, (char *)&n, sizeof(n));
+
+    /* Enable broadcast on socket */
+    int broadcast = 1;
+    setsockopt(s, SOL_SOCKET, SO_BROADCAST, (char *)&broadcast, sizeof(broadcast));
+
+    /* Bind our socket to port PORT and the given IP address (usually 0.0.0.0 or ::) */
+    struct sockaddr_storage addr;
+    size_t addrsize;
+
+    if (af == AF_INET) {
+        struct sockaddr_in *addr4 = (struct sockaddr_in *)&addr;
+
+        addrsize = sizeof(struct sockaddr_in);
+        addr4->sin_family = AF_INET;
+        addr4->sin_port = 0;
+        memcpy(&addr4->sin_addr, addrbytes, addrlen);
+    } else if (af == AF_INET6) {
+        struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)&addr;
+
+        addrsize = sizeof(struct sockaddr_in6);
+        addr6->sin6_family = AF_INET6;
+        addr6->sin6_port = 0;
+        memcpy(&addr6->sin6_addr, addrbytes, addrlen);
+
+        addr6->sin6_flowinfo = 0;
+        addr6->sin6_scope_id = 0;
+    } else {
+        _net_override.kill_sock(_net_override.user_ctx, s);
+        return -1;
+    }
+
+    if (af == AF_INET6) {
+#ifdef TOX_LOGGER
+        int is_dualstack =
+#endif /* TOX_LOGGER */
+            set_socket_dualstack(s);
+        LOGGER_DEBUG( "Dual-stack socket: %s",
+                      is_dualstack ? "enabled" : "Failed to enable, won't be able to receive from/send to IPv4 addresses" );
+        /* multicast local nodes */
+        struct ipv6_mreq mreq;
+        memset(&mreq, 0, sizeof(mreq));
+        mreq.ipv6mr_multiaddr.s6_addr[ 0] = 0xFF;
+        mreq.ipv6mr_multiaddr.s6_addr[ 1] = 0x02;
+        mreq.ipv6mr_multiaddr.s6_addr[15] = 0x01;
+        mreq.ipv6mr_interface = 0;
+#ifdef TOX_LOGGER
+        int res =
+#endif /* TOX_LOGGER */
+            setsockopt(s, IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, (char *)&mreq, sizeof(mreq));
+
+        LOGGER_DEBUG(res < 0 ? "Failed to activate local multicast membership. (%u, %s)" :
+                     "Local multicast group FF02::1 joined successfully", errno, strerror(errno) );
+    }
+
+    if (bind(s, (struct sockaddr *)&addr, addrsize)) {
+        _net_override.kill_sock(_net_override.user_ctx, s);
+        return -1;
+    }
+
+    return s;
+}
+
 /* Initialize networking.
  * Bind to ip and port.
  * ip must be in network order EX: 127.0.0.1 = (7F000001).
@@ -520,7 +639,7 @@ Networking_Core *new_networking_ex(IP ip, uint16_t port_from, uint16_t port_to, 
     /* maybe check for invalid IPs like 224+.x.y.z? if there is any IP set ever */
     if (ip.family != AF_INET && ip.family != AF_INET6) {
 #ifdef DEBUG
-        fprintf(stderr, "Invalid address family: %u\n", ip.family);
+        //fprintf(stderr, "Invalid address family: %u\n", af);
 #endif
         return NULL;
     }
@@ -534,16 +653,22 @@ Networking_Core *new_networking_ex(IP ip, uint16_t port_from, uint16_t port_to, 
         return NULL;
 
     temp->family = ip.family;
-    temp->port = 0;
+    temp->port = port_from;
 
     /* Initialize our socket. */
     /* add log message what we're creating */
-    temp->sock = socket(temp->family, SOCK_DGRAM, IPPROTO_UDP);
+    void *abytes =
+        temp->family == AF_INET ?
+        &ip.ip4.in_addr : &ip.ip6.in6_addr;
+    int addrlen =
+        temp->family == AF_INET ?
+        sizeof(ip.ip4.in_addr) : sizeof(ip.ip6.in6_addr);
+    temp->sock = _net_override.new_socket(_net_override.user_ctx, temp->family, SOCK_DGRAM, IPPROTO_UDP, abytes, addrlen, port_from);
 
     /* Check for socket error. */
     if (!sock_valid(temp->sock)) {
 #ifdef DEBUG
-        fprintf(stderr, "Failed to get a socket?! %u, %s\n", errno, strerror(errno));
+        //fprintf(stderr, "Failed to get a socket?! %u, %s\n", errno, strerror(errno));
 #endif
         free(temp);
 
@@ -552,16 +677,6 @@ Networking_Core *new_networking_ex(IP ip, uint16_t port_from, uint16_t port_to, 
 
         return NULL;
     }
-
-    /* Functions to increase the size of the send and receive UDP buffers.
-     */
-    int n = 1024 * 1024 * 2;
-    setsockopt(temp->sock, SOL_SOCKET, SO_RCVBUF, (char *)&n, sizeof(n));
-    setsockopt(temp->sock, SOL_SOCKET, SO_SNDBUF, (char *)&n, sizeof(n));
-
-    /* Enable broadcast on socket */
-    int broadcast = 1;
-    setsockopt(temp->sock, SOL_SOCKET, SO_BROADCAST, (char *)&broadcast, sizeof(broadcast));
 
     /* iOS UDP sockets are weird and apparently can SIGPIPE */
     if (!set_socket_nosigpipe(temp->sock)) {
@@ -583,117 +698,45 @@ Networking_Core *new_networking_ex(IP ip, uint16_t port_from, uint16_t port_to, 
         return NULL;
     }
 
-    /* Bind our socket to port PORT and the given IP address (usually 0.0.0.0 or ::) */
-    uint16_t *portptr = NULL;
-    struct sockaddr_storage addr;
-    size_t addrsize;
+    return temp;
+}
 
-    if (temp->family == AF_INET) {
-        struct sockaddr_in *addr4 = (struct sockaddr_in *)&addr;
+static Networking_Override _net_override = {
+    .user_ctx = 0,
+    .sock_valid = _sock_valid,
+    .kill_sock = _kill_sock,
+    .set_socket_nonblock = _set_socket_nonblock,
+    .set_socket_nosigpipe = _set_socket_nosigpipe,
+    .set_socket_reuseaddr = _set_socket_reuseaddr,
+    .set_socket_dualstack = _set_socket_dualstack,
+    .sendpacket = _sendpacket,
+    .networking_poll = networking_poll_override,
+    .new_socket = new_socket
+};
 
-        addrsize = sizeof(struct sockaddr_in);
-        addr4->sin_family = AF_INET;
-        addr4->sin_port = 0;
-        addr4->sin_addr = ip.ip4.in_addr;
-
-        portptr = &addr4->sin_port;
-    } else if (temp->family == AF_INET6) {
-        struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)&addr;
-
-        addrsize = sizeof(struct sockaddr_in6);
-        addr6->sin6_family = AF_INET6;
-        addr6->sin6_port = 0;
-        addr6->sin6_addr = ip.ip6.in6_addr;
-
-        addr6->sin6_flowinfo = 0;
-        addr6->sin6_scope_id = 0;
-
-        portptr = &addr6->sin6_port;
-    } else {
-        free(temp);
-        return NULL;
-    }
-
-    if (ip.family == AF_INET6) {
-#ifdef TOX_LOGGER
-        int is_dualstack =
-#endif /* TOX_LOGGER */
-            set_socket_dualstack(temp->sock);
-        LOGGER_DEBUG( "Dual-stack socket: %s",
-                      is_dualstack ? "enabled" : "Failed to enable, won't be able to receive from/send to IPv4 addresses" );
-        /* multicast local nodes */
-        struct ipv6_mreq mreq;
-        memset(&mreq, 0, sizeof(mreq));
-        mreq.ipv6mr_multiaddr.s6_addr[ 0] = 0xFF;
-        mreq.ipv6mr_multiaddr.s6_addr[ 1] = 0x02;
-        mreq.ipv6mr_multiaddr.s6_addr[15] = 0x01;
-        mreq.ipv6mr_interface = 0;
-#ifdef TOX_LOGGER
-        int res =
-#endif /* TOX_LOGGER */
-            setsockopt(temp->sock, IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, (char *)&mreq, sizeof(mreq));
-
-        LOGGER_DEBUG(res < 0 ? "Failed to activate local multicast membership. (%u, %s)" :
-                     "Local multicast group FF02::1 joined successfully", errno, strerror(errno) );
-    }
-
-    /* a hanging program or a different user might block the standard port;
-     * as long as it isn't a parameter coming from the commandline,
-     * try a few ports after it, to see if we can find a "free" one
-     *
-     * if we go on without binding, the first sendto() automatically binds to
-     * a free port chosen by the system (i.e. anything from 1024 to 65535)
-     *
-     * returning NULL after bind fails has both advantages and disadvantages:
-     * advantage:
-     *   we can rely on getting the port in the range 33445..33450, which
-     *   enables us to tell joe user to open their firewall to a small range
-     *
-     * disadvantage:
-     *   some clients might not test return of tox_new(), blindly assuming that
-     *   it worked ok (which it did previously without a successful bind)
-     */
-    uint16_t port_to_try = port_from;
-    *portptr = htons(port_to_try);
-    int tries;
-
-    for (tries = port_from; tries <= port_to; tries++) {
-        int res = bind(temp->sock, (struct sockaddr *)&addr, addrsize);
-
-        if (!res) {
-            temp->port = *portptr;
-
-            LOGGER_DEBUG("Bound successfully to %s:%u", ip_ntoa(&ip), ntohs(temp->port));
-
-            /* errno isn't reset on success, only set on failure, the failed
-             * binds with parallel clients yield a -EPERM to the outside if
-             * errno isn't cleared here */
-            if (tries > 0)
-                errno = 0;
-
-            if (error)
-                *error = 0;
-
-            return temp;
-        }
-
-        port_to_try++;
-
-        if (port_to_try > port_to)
-            port_to_try = port_from;
-
-        *portptr = htons(port_to_try);
-    }
-
-    LOGGER_ERROR("Failed to bind socket: %u, %s IP: %s port_from: %u port_to: %u", errno, strerror(errno),
-                 ip_ntoa(&ip), port_from, port_to);
-
-    kill_networking(temp);
-
-    if (error)
-        *error = 1;
-
-    return NULL;
+/* Function to set up networking redirects */
+void tox_set_network_overrides
+    (void *user_ctx,
+     sock_valid_t sock_valid,
+     kill_sock_t kill_sock,
+     set_socket_nonblock_t nonblock,
+     set_socket_nosigpipe_t nosigpipe,
+     set_socket_reuseaddr_t reuseaddr,
+     set_socket_dualstack_t dualstack,
+     sendpacket_t sendpacket,
+     networking_poll_t networking_poll,
+     new_socket_t new_socket)
+{
+    _net_override.user_ctx = user_ctx;
+    _net_override.sock_valid = sock_valid;
+    _net_override.kill_sock = kill_sock;
+    _net_override.set_socket_nonblock = nonblock;
+    _net_override.set_socket_nosigpipe = nosigpipe;
+    _net_override.set_socket_reuseaddr = reuseaddr;
+    _net_override.set_socket_dualstack = dualstack;
+    _net_override.sendpacket = sendpacket;
+    _net_override.networking_poll = networking_poll;
+    _net_override.new_socket = new_socket;
 }
 
 /* Function to cleanup networking stuff. */
@@ -720,7 +763,7 @@ int ip_equal(const IP *a, const IP *b)
 {
     if (!a || !b)
         return 0;
-
+    
     /* same family */
     if (a->family == b->family) {
         if (a->family == AF_INET)

@@ -306,6 +306,37 @@ typedef struct {
     sock_t sock;
 } Networking_Core;
 
+typedef struct {
+    uint8_t* data;
+    uint32_t length;
+    IP_Port *port;
+} Networking_PacketReceive;
+
+/* Override functions */
+
+typedef int (*sock_valid_t)(void *user_ctx, sock_t sock);
+typedef void (*kill_sock_t)(void *user_ctx, sock_t sock);
+typedef int (*set_socket_nonblock_t)(void *user_ctx, sock_t sock);
+typedef int (*set_socket_nosigpipe_t)(void *user_ctx, sock_t sock);
+typedef int (*set_socket_reuseaddr_t)(void *user_ctx, sock_t sock);
+typedef int (*set_socket_dualstack_t)(void *user_ctx, sock_t sock);
+typedef int (*sendpacket_t)(void *user_ctx, sock_t sock, IP_Port *ip_port, const uint8_t *data, uint16_t length);
+typedef void (*networking_poll_t)(void *user_ctx, sock_t sock, int af, Networking_PacketReceive *packet);
+typedef sock_t (*new_socket_t)(void *user_ctx, int af, int type, int proto, const char *addrbytes, int addrlen, int port);
+
+typedef struct {
+    void *user_ctx;
+    sock_valid_t sock_valid;
+    kill_sock_t kill_sock;
+    set_socket_nonblock_t set_socket_nonblock;
+    set_socket_nosigpipe_t set_socket_nosigpipe;
+    set_socket_reuseaddr_t set_socket_reuseaddr;
+    set_socket_dualstack_t set_socket_dualstack;
+    sendpacket_t sendpacket;
+    networking_poll_t networking_poll;
+    new_socket_t new_socket;
+} Networking_Override;
+
 /* Run this before creating sockets.
  *
  * return 0 on success
@@ -378,6 +409,19 @@ void networking_poll(Networking_Core *net);
  */
 Networking_Core *new_networking(IP ip, uint16_t port);
 Networking_Core *new_networking_ex(IP ip, uint16_t port_from, uint16_t port_to, unsigned int *error);
+
+/* Function to initialize the overrides struct */
+void tox_set_network_overrides
+    (void *user_ctx,
+     sock_valid_t sock_valid,
+     kill_sock_t kill_sock,
+     set_socket_nonblock_t nonblock,
+     set_socket_nosigpipe_t nosigpipe,
+     set_socket_reuseaddr_t reuseaddr,
+     set_socket_dualstack_t dualstack,
+     sendpacket_t sendpacket,
+     networking_poll_t networking_poll,
+     new_socket_t new_socket);
 
 /* Function to cleanup networking stuff (doesn't do much right now). */
 void kill_networking(Networking_Core *net);
