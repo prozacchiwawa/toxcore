@@ -321,7 +321,7 @@ typedef int (*set_socket_nosigpipe_t)(void *user_ctx, sock_t sock);
 typedef int (*set_socket_reuseaddr_t)(void *user_ctx, sock_t sock);
 typedef int (*set_socket_dualstack_t)(void *user_ctx, sock_t sock);
 typedef int (*sendpacket_t)(void *user_ctx, sock_t sock, IP_Port *ip_port, const uint8_t *data, uint16_t length);
-typedef void (*networking_poll_t)(void *user_ctx, sock_t sock, int af, Networking_PacketReceive *packet);
+typedef int (*networking_poll_t)(void *user_ctx, sock_t sock, Networking_PacketReceive *packet);
 typedef sock_t (*new_socket_t)(void *user_ctx, int af, int type, int proto, const char *addrbytes, int addrlen, int port);
 
 typedef struct {

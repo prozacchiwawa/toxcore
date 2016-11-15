@@ -449,7 +449,7 @@ void networking_registerhandler(Networking_Core *net, uint8_t byte, packet_handl
     net->packethandlers[byte].object = object;
 }
 
-int networking_poll_override(void *user_ctx, sock_t sock, Networking_PacketReceive *packet)
+int _networking_poll_override(void *user_ctx, sock_t sock, Networking_PacketReceive *packet)
 {
     return receivepacket(sock, packet->port, packet->data, &packet->length);
 }
@@ -467,7 +467,7 @@ void networking_poll(Networking_Core *net)
     Networking_PacketReceive packet =
         { .data = data, .length = sizeof(data), .port = &resultPort };
 
-    while (networking_poll_override(_net_override.user_ctx, net->sock, &packet) != -1) {
+    while (_net_override.networking_poll(_net_override.user_ctx, net->sock, &packet) != -1) {
         if (packet.length < 1) continue;
 
         if (!(net->packethandlers[data[0]].function)) {
@@ -710,7 +710,7 @@ static Networking_Override _net_override = {
     .set_socket_reuseaddr = _set_socket_reuseaddr,
     .set_socket_dualstack = _set_socket_dualstack,
     .sendpacket = _sendpacket,
-    .networking_poll = networking_poll_override,
+    .networking_poll = _networking_poll_override,
     .new_socket = new_socket
 };
 
