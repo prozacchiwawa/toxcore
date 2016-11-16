@@ -297,6 +297,10 @@ typedef struct {
     void *object;
 } Packet_Handles;
 
+typedef struct _Networking_ListHead {
+    struct _Networking_ListHead *prev, *next;
+} Networking_ListHead;
+
 typedef struct {
     Packet_Handles packethandlers[256];
 
@@ -304,13 +308,35 @@ typedef struct {
     uint16_t port;
     /* Our UDP socket. */
     sock_t sock;
+    
+    Networking_ListHead packets;
 } Networking_Core;
 
-typedef struct {
+typedef struct _Networking_PacketReceive {
+    Networking_ListHead item;
     uint8_t* data;
     uint32_t length;
-    IP_Port *port;
+    IP_Port port;
 } Networking_PacketReceive;
+
+static inline void ListHead_InsertTail(Networking_ListHead *head, Networking_ListHead *item) {
+    item->prev = head->prev;
+    item->next = head;
+    head->prev->next = item;
+    head->prev = item;
+}
+
+static inline Networking_ListHead *ListHead_RemoveHead(Networking_ListHead *head) {
+    Networking_ListHead *item;
+    if (head->next == head) {
+        return NULL;
+    } else {
+        item = head->next;
+        item->next->prev = head;
+        head->next = item->next;
+        return item;
+    }
+}
 
 /* Override functions */
 
@@ -320,7 +346,7 @@ typedef int (*set_socket_nonblock_t)(void *user_ctx, sock_t sock);
 typedef int (*set_socket_nosigpipe_t)(void *user_ctx, sock_t sock);
 typedef int (*set_socket_reuseaddr_t)(void *user_ctx, sock_t sock);
 typedef int (*set_socket_dualstack_t)(void *user_ctx, sock_t sock);
-typedef int (*sendpacket_t)(void *user_ctx, sock_t sock, IP_Port *ip_port, const uint8_t *data, uint16_t length);
+typedef int (*sendpacket_t)(void *user_ctx, sock_t sock, int af, IP_Port *ip_port, const uint8_t *data, uint16_t length);
 typedef int (*networking_poll_t)(void *user_ctx, sock_t sock, Networking_PacketReceive *packet);
 typedef sock_t (*new_socket_t)(void *user_ctx, int af, int type, int proto, const char *addrbytes, int addrlen, int port);
 

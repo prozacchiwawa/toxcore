@@ -389,7 +389,17 @@ int _sendpacket(void *user_ctx, sock_t sock, int af, IP_Port *ip_port, const uin
 
 int sendpacket(Networking_Core *net, IP_Port ip_port, const uint8_t *data, uint16_t length)
 {
-    return _net_override.sendpacket(_net_override.user_ctx, net->sock, &ip_port, data, length);
+    Networking_PacketReceive *pkt = calloc(sizeof(Networking_PacketReceive), 1);
+    pkt->port = ip_port;
+    pkt->data = malloc(length);
+    memcpy(pkt->data, data, length);
+    pkt->length = length;
+
+    ListHead_InsertTail(&net->packets, &pkt->item);
+
+    fprintf(stderr, "sendpacket(%d)\n", pkt->length);
+
+    return _net_override.sendpacket(_net_override.user_ctx, net->sock, net->family, &pkt->port, pkt->data, length);
 }
 
 /* Function to receive data
@@ -451,13 +461,21 @@ void networking_registerhandler(Networking_Core *net, uint8_t byte, packet_handl
 
 int _networking_poll_override(void *user_ctx, sock_t sock, Networking_PacketReceive *packet)
 {
-    return receivepacket(sock, packet->port, packet->data, &packet->length);
+    return receivepacket(sock, &packet->port, packet->data, &packet->length);
 }
 
 void networking_poll(Networking_Core *net)
 {
     if (net->family == 0) /* Socket not initialized */
         return;
+
+    Networking_ListHead *item;
+    while ((item = ListHead_RemoveHead(&net->packets)) != NULL) {
+        Networking_PacketReceive *recv = (Networking_PacketReceive*)item;
+        fprintf(stderr, "Remove packet %d,%x\n", recv->length, recv->data[0]);
+        free(recv->data);
+        free(recv);
+    }
 
     unix_time_update();
 
@@ -475,7 +493,7 @@ void networking_poll(Networking_Core *net)
             continue;
         }
 
-        net->packethandlers[data[0]].function(net->packethandlers[data[0]].object, *packet.port, data, packet.length);
+        net->packethandlers[data[0]].function(net->packethandlers[data[0]].object, packet.port, data, packet.length);
     }
 }
 
@@ -652,6 +670,7 @@ Networking_Core *new_networking_ex(IP ip, uint16_t port_from, uint16_t port_to, 
     if (temp == NULL)
         return NULL;
 
+    temp->packets.next = temp->packets.prev = &temp->packets;
     temp->family = ip.family;
     temp->port = port_from;
 
