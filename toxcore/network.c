@@ -482,18 +482,19 @@ void networking_poll(Networking_Core *net)
     uint8_t data[MAX_UDP_PACKET_SIZE];
 
     IP_Port resultPort;
-    Networking_PacketReceive packet =
-        { .data = data, .length = sizeof(data), .port = &resultPort };
+    int length = -1;
 
-    while (_net_override.networking_poll(_net_override.user_ctx, net->sock, &packet) != -1) {
-        if (packet.length < 1) continue;
+    memset(&resultPort, 0, sizeof(resultPort));
+
+    while ((length = _net_override.networking_poll(_net_override.user_ctx, net->sock, (uint8_t *)&resultPort, data)) != -1) {
+        if (length < 1) continue;
 
         if (!(net->packethandlers[data[0]].function)) {
             LOGGER_WARNING("[%02u] -- Packet has no handler", data[0]);
             continue;
         }
 
-        net->packethandlers[data[0]].function(net->packethandlers[data[0]].object, packet.port, data, packet.length);
+        net->packethandlers[data[0]].function(net->packethandlers[data[0]].object, resultPort, data, length);
     }
 }
 
