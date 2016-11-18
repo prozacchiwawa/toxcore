@@ -397,8 +397,6 @@ int sendpacket(Networking_Core *net, IP_Port ip_port, const uint8_t *data, uint1
 
     ListHead_InsertTail(&net->packets, &pkt->item);
 
-    fprintf(stderr, "sendpacket(%d)\n", pkt->length);
-
     return _net_override.sendpacket(_net_override.user_ctx, net->sock, net->family, &pkt->port, pkt->data, length);
 }
 
@@ -459,9 +457,14 @@ void networking_registerhandler(Networking_Core *net, uint8_t byte, packet_handl
     net->packethandlers[byte].object = object;
 }
 
-int _networking_poll_override(void *user_ctx, sock_t sock, Networking_PacketReceive *packet)
+int _networking_poll_override(void *user_ctx, sock_t sock, IP_Port *port, uint8_t *data)
 {
-    return receivepacket(sock, &packet->port, packet->data, &packet->length);
+    uint32_t length;
+    if (receivepacket(sock, port, data, &length)) {
+        return -1;
+    } else {
+        return length;
+    }
 }
 
 void networking_poll(Networking_Core *net)
@@ -472,7 +475,6 @@ void networking_poll(Networking_Core *net)
     Networking_ListHead *item;
     while ((item = ListHead_RemoveHead(&net->packets)) != NULL) {
         Networking_PacketReceive *recv = (Networking_PacketReceive*)item;
-        fprintf(stderr, "Remove packet %d,%x\n", recv->length, recv->data[0]);
         free(recv->data);
         free(recv);
     }
@@ -486,7 +488,7 @@ void networking_poll(Networking_Core *net)
 
     memset(&resultPort, 0, sizeof(resultPort));
 
-    while ((length = _net_override.networking_poll(_net_override.user_ctx, net->sock, (uint8_t *)&resultPort, data)) != -1) {
+    while ((length = _net_override.networking_poll(_net_override.user_ctx, net->sock, &resultPort, data)) != -1) {
         if (length < 1) continue;
 
         if (!(net->packethandlers[data[0]].function)) {
